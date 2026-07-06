@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TNS · Poste de Supervision Embarqué</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+<style>
+  :root {
+  --bg-deep: #F5F7FA;
+  --panel: #FFFFFF;
+  --panel-alt: #F8FAFC;
+  --border: #D6DEE8;
+  --border-soft: #E7EDF3;
+
+  --text-primary: #1F2937;
+  --text-muted: #6B7280;
+  --text-dim: #9CA3AF;
+
+  --scope: #10B981;
+  --scope-dim: rgba(16, 185, 129, 0.12);
+
+  --amber: #F59E0B;
+  --red: #EF4444;
+  --blue: #3B82F6;
+
+  --mono: 'IBM Plex Mono', monospace;
+  --sans: 'IBM Plex Sans', sans-serif;
+}
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg-deep);
+    background-image:
+      radial-gradient(circle at 15% 0%, rgba(16,185,129,0.06), transparent 40%),
+      radial-gradient(circle at 85% 100%, rgba(59,130,246,0.06), transparent 40%);
+    color: var(--text-primary);
+    font-family: var(--sans);
+    padding: 20px 24px 40px;
+    min-height: 100vh;
+  }
+
+  /* ---------- Header ---------- */
+  .topbar {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 16px;
+    padding-bottom: 18px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 20px;
+  }
+  .topbar .eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .topbar h1 {
+    font-family: var(--mono);
+    font-size: 21px;
+    font-weight: 600;
+    margin: 0;
+    letter-spacing: 0.01em;
+  }
+  .topbar h1 .arrow { color: var(--text-dim); font-weight: 400; margin: 0 4px; }
+  .infra-status {
+    display: flex;
+    gap: 22px;
+    align-items: center;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+  .infra-status .item { display: flex; align-items: center; gap: 7px; }
+  .infra-status .val { color: var(--text-primary); font-weight: 600; }
+  .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--text-dim);
+    box-shadow: none;
+    transition: all .3s;
+  }
+  .dot.en-ligne {
+    background: var(--scope);
+    box-shadow: 0 0 8px 1px var(--scope);
+  }
+
+  /* ---------- Grid layout ---------- */
+  .grid {
+    display: grid;
+    grid-template-columns: 2.1fr 1fr;
+    gap: 16px;
+  }
+  @media (max-width: 980px) { .grid { grid-template-columns: 1fr; } }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 18px;
+  }
+  .panel-title {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin: 0 0 12px 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .panel-title .tag {
+    font-size: 10px;
+    padding: 2px 7px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+  }
+
+  /* ---------- Oscilloscope chart panel ---------- */
+  .scope-panel { position: relative; overflow: hidden; }
+  .scope-panel canvas { position: relative; z-index: 1; }
+
+  /* ---------- KPI column ---------- */
+  .kpi-stack { display: flex; flex-direction: column; gap: 12px; }
+  .kpi-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .kpi-card {
+    background: var(--panel-alt);
+    border: 1px solid var(--border-soft);
+    border-radius: 6px;
+    padding: 10px 12px;
+  }
+  .kpi-card .label {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .kpi-card .value {
+    font-family: var(--mono);
+    font-size: 20px;
+    font-weight: 600;
+    margin-top: 4px;
+    color: var(--text-primary);
+  }
+  .kpi-card .unit { font-size: 12px; color: var(--text-dim); margin-left: 3px; }
+
+  /* ---------- LED indicator ---------- */
+  .led-panel {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    background: var(--panel-alt);
+    border: 1px solid var(--border-soft);
+    border-radius: 6px;
+    padding: 14px 16px;
+  }
+  .led {
+    width: 22px; height: 22px; border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #2a2, #163);
+    border: 2px solid #1b3a2c;
+    transition: all .25s;
+  }
+  .led.normal { background: radial-gradient(circle at 35% 30%, #7DFFCB, var(--scope)); box-shadow: 0 0 14px 3px rgba(79,227,176,0.55); border-color: #1a5c46; }
+  .led.avertissement { background: radial-gradient(circle at 35% 30%, #FFD98C, var(--amber)); box-shadow: 0 0 14px 3px rgba(242,169,59,0.55); border-color: #6b4c1a; }
+  .led.critique { background: radial-gradient(circle at 35% 30%, #FF95A6, var(--red)); box-shadow: 0 0 14px 3px rgba(240,84,107,0.6); border-color: #6b1a28; animation: pulse 0.9s infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.55; } }
+  .led-text .label { font-family: var(--mono); font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; }
+  .led-text .state { font-family: var(--mono); font-size: 15px; font-weight: 600; margin-top: 2px; }
+
+  /* ---------- Events log ---------- */
+  .events-list { max-height: 230px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+  .event-item {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    padding: 8px 10px;
+    border-radius: 4px;
+    background: var(--panel-alt);
+    border-left: 3px solid var(--text-dim);
+    color: var(--text-muted);
+  }
+  .event-item .ts { color: var(--text-dim); margin-right: 8px; }
+  .event-item.avertissement { border-left-color: var(--amber); color: #E8D2A8; }
+  .event-item.critique { border-left-color: var(--red); color: #F2C1CA; }
+  .events-empty { font-family: var(--mono); font-size: 12px; color: var(--text-dim); padding: 8px 0; }
+
+  /* ---------- Control panel ---------- */
+  .control-panel { margin-top: 16px; }
+  .control-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    align-items: end;
+  }
+  @media (max-width: 780px) { .control-grid { grid-template-columns: 1fr 1fr; } }
+
+  .control-field label {
+    display: block;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    margin-bottom: 8px;
+  }
+  select, input[type=number] {
+    width: 100%;
+    background: var(--panel-alt);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    font-family: var(--mono);
+    font-size: 13px;
+    padding: 9px 10px;
+    border-radius: 5px;
+  }
+  select:focus, input:focus { outline: 1px solid var(--scope); border-color: var(--scope); }
+
+  input[type=range] {
+    width: 100%;
+    accent-color: var(--scope);
+  }
+  .slider-value {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--scope);
+    margin-top: 6px;
+  }
+
+  .btn {
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    padding: 10px 16px;
+    border-radius: 5px;
+    border: 1px solid var(--border);
+    background: var(--panel-alt);
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .btn:hover { border-color: var(--scope); color: var(--scope); }
+  .btn.primary { background: rgba(79,227,176,0.1); border-color: var(--scope); color: var(--scope); }
+  .btn.primary:hover { background: rgba(79,227,176,0.18); }
+  .btn.stop { border-color: var(--red); color: var(--red); background: rgba(240,84,107,0.08); }
+
+  .actions-row { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div>
+    <div class="eyebrow">TP Traitement Numérique du Signal — Partie E</div>
+    <h1>ESP32<span class="arrow">→</span>FLASK<span class="arrow">→</span>WEB · Poste de Supervision</h1>
+  </div>
+  <div class="infra-status">
+    <div class="item"><span class="dot" id="dot-ligne"></span><span id="txt-ligne">Hors ligne</span></div>
+    <div class="item">RSSI <span class="val" id="val-rssi">--</span> dBm</div>
+    <div class="item">Uptime <span class="val" id="val-uptime">--</span></div>
+    <div class="item">Débit <span class="val" id="val-debit">--</span> Hz</div>
+  </div>
+</div>
+
+<div class="grid">
+
+  <!-- ============== COLONNE PRINCIPALE ============== -->
+  <div style="display:flex; flex-direction:column; gap:16px;">
+
+    <div class="panel scope-panel">
+      <div class="panel-title">
+        Signal temporel — brut vs filtré
+        <span class="tag" id="tag-filtre">FIR</span>
+      </div>
+      <canvas id="chartTemporel" height="105"></canvas>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">
+        Spectre fréquentiel — |X[k]| (TFD glissante, 32 derniers échantillons)
+      </div>
+      <canvas id="chartSpectre" height="80"></canvas>
+    </div>
+
+    <div class="panel control-panel">
+      <div class="panel-title">Panneau de contrôle — configuration à distance</div>
+      <div class="control-grid">
+        <div class="control-field">
+          <label for="sel-filtre">Type de filtre</label>
+          <select id="sel-filtre">
+            <option value="FIR">FIR — Moyenne glissante</option>
+            <option value="PASSE_HAUT">Passe-haut (différence)</option>
+            <option value="ADAPTATIF">Adaptatif (ordre variable)</option>
+          </select>
+        </div>
+        <div class="control-field">
+          <label for="rng-seuil">Seuil de détection d'événement</label>
+          <input type="range" id="rng-seuil" min="1" max="30" step="0.5" value="8">
+          <div class="slider-value"><span id="val-seuil">8.0</span> unités</div>
+        </div>
+        <div class="control-field">
+          <label for="num-intervalle">Fréquence d'acquisition (ms)</label>
+          <input type="number" id="num-intervalle" min="100" max="5000" step="100" value="500">
+        </div>
+        <div class="control-field">
+          <button class="btn primary" id="btn-appliquer" style="width:100%;">Appliquer la configuration</button>
+        </div>
+      </div>
+      <div class="actions-row">
+        <button class="btn" id="btn-simuler">▶ Démarrer simulation (sans matériel)</button>
+        <button class="btn stop" id="btn-arreter">■ Arrêter simulation</button>
+        <button class="btn" id="btn-reset">↺ Réinitialiser les buffers</button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ============== COLONNE LATÉRALE ============== -->
+  <div style="display:flex; flex-direction:column; gap:16px;">
+
+    <div class="panel">
+      <div class="panel-title">État du système</div>
+      <div class="led-panel">
+        <div class="led normal" id="led-etat"></div>
+        <div class="led-text">
+          <div class="label">Détection d'événements</div>
+          <div class="state" id="txt-etat">Normal</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">Indicateurs (fenêtre glissante, 20 éch.)</div>
+      <div class="kpi-stack">
+        <div class="kpi-row">
+          <div class="kpi-card">
+            <div class="label">Moyenne μ</div>
+            <div class="value" id="kpi-moyenne">--</div>
+          </div>
+          <div class="kpi-card">
+            <div class="label">Écart-type σ</div>
+            <div class="value" id="kpi-ecart-type">--</div>
+          </div>
+        </div>
+        <div class="kpi-row">
+          <div class="kpi-card">
+            <div class="label">Variance σ²</div>
+            <div class="value" id="kpi-variance">--</div>
+          </div>
+          <div class="kpi-card">
+            <div class="label">Échantillons</div>
+            <div class="value" id="kpi-total">0</div>
+          </div>
+        </div>
+        <div class="kpi-row">
+          <div class="kpi-card">
+            <div class="label">Amplitude max</div>
+            <div class="value" id="kpi-max">--</div>
+          </div>
+          <div class="kpi-card">
+            <div class="label">Amplitude min</div>
+            <div class="value" id="kpi-min">--</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" style="flex:1;">
+      <div class="panel-title">Journal des alertes</div>
+      <div class="events-list" id="events-list">
+        <div class="events-empty">Aucune alerte pour l'instant.</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ============================================================
+// Connexion SocketIO
+// ============================================================
+const socket = io();
+
+// ============================================================
+// Chart 1 : signal temporel (brut vs filtré)
+// ============================================================
+const ctxTemporel = document.getElementById('chartTemporel').getContext('2d');
+const chartTemporel = new Chart(ctxTemporel, {
+  type: 'line',
+  data: {
+    labels: [],
+    datasets: [
+      {
+        label: 'Signal brut x[n]',
+        data: [],
+        borderColor: '#4FA8E8',
+        backgroundColor: 'transparent',
+        borderWidth: 1.4,
+        pointRadius: 0,
+        tension: 0.15,
+      },
+      {
+        label: 'Signal filtré y[n]',
+        data: [],
+        borderColor: '#4FE3B0',
+        backgroundColor: 'rgba(79,227,176,0.06)',
+        borderWidth: 2.2,
+        pointRadius: 0,
+        tension: 0.25,
+        fill: true,
+      }
+    ]
+  },
+  options: {
+    responsive: true,
+    animation: false,
+    interaction: { mode: 'index', intersect: false },
+    scales: {
+      x: { ticks: { color: '#6B7280', font: { family: 'IBM Plex Mono', size: 10 } }, grid: { color: '#E5E7EB' } },
+      y: { ticks: { color: '#6B7280', font: { family: 'IBM Plex Mono', size: 10 } }, grid: { color: '#E5E7EB' } }
+    },
+    plugins: { legend: { labels: { color: '#1F2937', font: { family: 'IBM Plex Mono', size: 11 } } } }
+  }
+});
+
+// ============================================================
+// Chart 2 : spectre fréquentiel
+// ============================================================
+const ctxSpectre = document.getElementById('chartSpectre').getContext('2d');
+const chartSpectre = new Chart(ctxSpectre, {
+  type: 'bar',
+  data: {
+    labels: [],
+    datasets: [{
+      label: '|X[k]|',
+      data: [],
+      backgroundColor: 'rgba(79,168,232,0.55)',
+      borderColor: '#4FA8E8',
+      borderWidth: 1,
+    }]
+  },
+  options: {
+    responsive: true,
+    animation: false,
+    scales: {
+      x: { title: { display: true, text: 'Fréquence normalisée', color: '#6B7280', font: { family: 'IBM Plex Mono', size: 10 } },
+           ticks: { color: '#6B7280', font: { family: 'IBM Plex Mono', size: 10 } }, grid: { color: '#E5E7EB' } },
+      y: { ticks: { color: '#6B7280', font: { family: 'IBM Plex Mono', size: 10 } }, grid: { color: '#E5E7EB' } }
+    },
+    plugins: { legend: { display: false } }
+  }
+});
+
+// ============================================================
+// Historique local des courbes (fenêtre d'affichage glissante)
+// ============================================================
+const TAILLE_AFFICHAGE = 40;
+let historiqueN = [], historiqueBrut = [], historiqueFiltre = [];
+
+function pousserPoint(point) {
+  historiqueN.push(point.n);
+  historiqueBrut.push(point.brut);
+  historiqueFiltre.push(point.filtre);
+  if (historiqueN.length > TAILLE_AFFICHAGE) {
+    historiqueN.shift(); historiqueBrut.shift(); historiqueFiltre.shift();
+  }
+  chartTemporel.data.labels = historiqueN;
+  chartTemporel.data.datasets[0].data = historiqueBrut;
+  chartTemporel.data.datasets[1].data = historiqueFiltre;
+  chartTemporel.update('none');
+}
+
+function mettreAJourSpectre(spectre) {
+  if (!spectre) return;
+  chartSpectre.data.labels = spectre.freqs.map(f => f.toFixed(2));
+  chartSpectre.data.datasets[0].data = spectre.magnitudes;
+  chartSpectre.update('none');
+}
+
+function mettreAJourKPIs(kpis) {
+  if (!kpis) return;
+  document.getElementById('kpi-moyenne').innerText = kpis.moyenne;
+  document.getElementById('kpi-variance').innerText = kpis.variance;
+  document.getElementById('kpi-ecart-type').innerText = kpis.ecart_type;
+  document.getElementById('kpi-max').innerText = kpis.max;
+  document.getElementById('kpi-min').innerText = kpis.min;
+  document.getElementById('kpi-total').innerText = kpis.nb_echantillons_fenetre;
+  document.getElementById('val-debit').innerText = kpis.debit_hz !== null ? kpis.debit_hz : '--';
+}
+
+function mettreAJourLED(severite) {
+  const led = document.getElementById('led-etat');
+  const txt = document.getElementById('txt-etat');
+  led.className = 'led ' + severite;
+  const labels = { normal: 'Normal', avertissement: 'Variation suspecte', critique: 'Seuil critique dépassé' };
+  txt.innerText = labels[severite] || 'Normal';
+}
+
+function mettreAJourInfra(infra) {
+  const dot = document.getElementById('dot-ligne');
+  const txt = document.getElementById('txt-ligne');
+  dot.className = 'dot' + (infra.en_ligne ? ' en-ligne' : '');
+  txt.innerText = infra.en_ligne ? ('En ligne (' + infra.source + ')') : 'Hors ligne';
+  document.getElementById('val-rssi').innerText = infra.rssi !== null && infra.rssi !== undefined ? infra.rssi : '--';
+  if (infra.uptime_esp32_s !== null && infra.uptime_esp32_s !== undefined) {
+    const s = Math.floor(infra.uptime_esp32_s);
+    document.getElementById('val-uptime').innerText = Math.floor(s/60) + 'm ' + (s%60) + 's';
+  }
+}
+
+function ajouterEvenement(evt) {
+  const liste = document.getElementById('events-list');
+  const vide = liste.querySelector('.events-empty');
+  if (vide) vide.remove();
+  const div = document.createElement('div');
+  div.className = 'event-item ' + evt.severite;
+  div.innerHTML = `<span class="ts">${evt.horodatage}</span>${evt.message}`;
+  liste.prepend(div);
+  while (liste.children.length > 30) liste.removeChild(liste.lastChild);
+}
+
+// ============================================================
+// Réception temps réel via SocketIO
+// ============================================================
+socket.on('nouvelle_donnee', (payload) => {
+  pousserPoint(payload.point);
+  mettreAJourKPIs(payload.kpis);
+  mettreAJourSpectre(payload.spectre);
+  mettreAJourLED(payload.point.severite);
+  mettreAJourInfra(payload.infra);
+  document.getElementById('tag-filtre').innerText =
+    payload.config.filtre === 'FIR' ? 'FIR' : (payload.config.filtre === 'PASSE_HAUT' ? 'PASSE-HAUT' : 'ADAPTATIF');
+});
+
+socket.on('nouvel_evenement', ajouterEvenement);
+
+socket.on('config_maj', (config) => {
+  document.getElementById('sel-filtre').value = config.filtre;
+  document.getElementById('rng-seuil').value = config.seuil_evenement;
+  document.getElementById('val-seuil').innerText = config.seuil_evenement.toFixed(1);
+  document.getElementById('num-intervalle').value = config.intervalle_ms;
+});
+
+socket.on('reinitialisation', () => {
+  historiqueN = []; historiqueBrut = []; historiqueFiltre = [];
+  chartTemporel.data.labels = []; chartTemporel.data.datasets[0].data = []; chartTemporel.data.datasets[1].data = [];
+  chartTemporel.update();
+  document.getElementById('events-list').innerHTML = '<div class="events-empty">Aucune alerte pour l\'instant.</div>';
+});
+
+// ============================================================
+// Chargement initial de l'état (au cas où des données existent déjà)
+// ============================================================
+async function chargerEtatInitial() {
+  const res = await fetch('/api/data');
+  const json = await res.json();
+  json.donnees.forEach(pousserPoint);
+  mettreAJourKPIs(json.kpis);
+  mettreAJourSpectre(json.spectre);
+  mettreAJourInfra(json.infra);
+  if (json.donnees.length) mettreAJourLED(json.donnees[json.donnees.length - 1].severite);
+  document.getElementById('sel-filtre').value = json.config.filtre;
+  document.getElementById('rng-seuil').value = json.config.seuil_evenement;
+  document.getElementById('val-seuil').innerText = json.config.seuil_evenement.toFixed(1);
+  document.getElementById('num-intervalle').value = json.config.intervalle_ms;
+  json.evenements.forEach(ajouterEvenement);
+}
+chargerEtatInitial();
+
+// ============================================================
+// Panneau de contrôle - actions utilisateur
+// ============================================================
+document.getElementById('rng-seuil').addEventListener('input', (e) => {
+  document.getElementById('val-seuil').innerText = parseFloat(e.target.value).toFixed(1);
+});
+
+document.getElementById('btn-appliquer').addEventListener('click', async () => {
+  const config = {
+    filtre: document.getElementById('sel-filtre').value,
+    seuil_evenement: parseFloat(document.getElementById('rng-seuil').value),
+    intervalle_ms: parseInt(document.getElementById('num-intervalle').value),
+  };
+  await fetch('/api/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(config)
+  });
+});
+
+document.getElementById('btn-simuler').addEventListener('click', () => fetch('/api/simuler/demarrer', { method: 'POST' }));
+document.getElementById('btn-arreter').addEventListener('click', () => fetch('/api/simuler/arreter', { method: 'POST' }));
+document.getElementById('btn-reset').addEventListener('click', () => fetch('/api/reset', { method: 'POST' }));
+</script>
+
+</body>
+</html>
